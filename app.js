@@ -63,16 +63,9 @@ const LAYOUT_VIDEO = { width: 1080, height: 1920, photoHeight: 1500 };
 
 const JPEG_QUALITY = 82; // 0-100, lower = smaller file / faster upload, less sharp
 
-// Poster templates. Add your own — each just needs a label + accent color.
-// These replace the movie-app's per-brand caption templates with generic
-// promo framing you can reuse across any product/offer/announcement.
-const TEMPLATES = {
-  limited_offer: { label: 'LIMITED OFFER 🔥', accent: '#E63946' },
-  new_arrival: { label: 'JUST DROPPED', accent: '#457B9D' },
-  announcement: { label: 'ANNOUNCEMENT 📣', accent: '#2A9D8F' },
-  social_proof: { label: 'PEOPLE ARE TALKING', accent: '#F4A261' },
-  event: { label: "DON'T MISS THIS", accent: '#8338EC' }
-};
+// Accent color used for the stripe under the photo and the CTA button.
+// Change this directly if you want a different brand color.
+const ACCENT_COLOR = '#E63946';
 
 // ── Pexels lookup ───────────────────────────────────────────────
 // orientation: 'portrait' (default, matches LAYOUT_POST/LAYOUT_VIDEO crop),
@@ -125,10 +118,9 @@ function wrapText(text, maxCharsPerLine) {
 
 // hook = headline, copy = supporting line, cta = button text (e.g. "Shop Now",
 // "Learn More", "Grab Yours"). Replaces the movie app's title/hook/rating/genres.
-function buildOverlaySvg({ hook, copy, cta, templateKey, layout }) {
+function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
-  const template = TEMPLATES[templateKey] || TEMPLATES.limited_offer;
   const hookLines = wrapText(hook || '', 20).slice(0, 3);
   const copyLines = wrapText(copy || '', 42).slice(0, 2);
 
@@ -151,7 +143,6 @@ function buildOverlaySvg({ hook, copy, cta, templateKey, layout }) {
   <svg width="${width}" height="${height}">
     <defs>
       <style>
-        .label { font: 700 34px sans-serif; fill: ${template.accent}; letter-spacing: 2px; }
         .hook { font: 800 58px sans-serif; fill: #ffffff; }
         .copy { font: 400 32px sans-serif; fill: #e6e6e6; }
         .cta { font: 700 30px sans-serif; fill: #0d0d0d; }
@@ -159,18 +150,17 @@ function buildOverlaySvg({ hook, copy, cta, templateKey, layout }) {
     </defs>
 
     <rect x="0" y="${photoHeight}" width="${width}" height="${textHeight}" fill="#0d0d0d"/>
-    <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${template.accent}"/>
+    <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${ACCENT_COLOR}"/>
 
-    <text x="50%" y="${photoHeight + 65}" text-anchor="middle" class="label">${escapeXml(template.label)}</text>
-    <text x="50%" y="${photoHeight + 135}" text-anchor="middle" class="hook">${hookTspans}</text>
-    <text x="50%" y="${photoHeight + 260}" text-anchor="middle" class="copy">${copyTspans}</text>
+    <text x="50%" y="${photoHeight + 100}" text-anchor="middle" class="hook">${hookTspans}</text>
+    <text x="50%" y="${photoHeight + 225}" text-anchor="middle" class="copy">${copyTspans}</text>
 
-    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${template.accent}"/>
+    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${ACCENT_COLOR}"/>
     <text x="50%" y="${ctaY + 42}" text-anchor="middle" class="cta">${ctaText}</text>
   </svg>`;
 }
 
-async function generatePosterImage({ photoUrl, hook, copy, cta, templateKey, layout = LAYOUT_POST }) {
+async function generatePosterImage({ photoUrl, hook, copy, cta, layout = LAYOUT_POST }) {
   const photoRes = await fetch(photoUrl);
   if (!photoRes.ok) throw new Error(`Failed to download photo: ${photoRes.status}`);
   const photoBuffer = Buffer.from(await photoRes.arrayBuffer());
@@ -179,7 +169,7 @@ async function generatePosterImage({ photoUrl, hook, copy, cta, templateKey, lay
     .resize(layout.width, layout.photoHeight, { fit: 'cover' })
     .toBuffer();
 
-  const overlaySvg = buildOverlaySvg({ hook, copy, cta, templateKey, layout });
+  const overlaySvg = buildOverlaySvg({ hook, copy, cta, layout });
 
   return sharp({
     create: {
@@ -338,7 +328,7 @@ async function createZernioPost({ content, mediaUrl, mediaType, platform, accoun
 // schedules the post at `scheduledFor` (ISO string, paired with `timezone`).
 // mediaKind: 'image' (default, X/portrait layout) or 'video' (TikTok, 9:16 Ken Burns clip)
 async function generateAndSchedule({
-  query, hook, copy, cta, template, orientation,
+  query, hook, copy, cta, orientation,
   platform, accountId, scheduledFor, timezone,
   mediaKind = 'image', videoSeconds = 3
 }) {
@@ -350,7 +340,6 @@ async function generateAndSchedule({
     hook,
     copy,
     cta,
-    templateKey: template,
     layout
   });
 
@@ -434,7 +423,6 @@ async function processDueJobs() {
           hook: job.hook,
           copy: job.copy,
           cta: job.cta,
-          template: job.template,
           orientation: job.orientation,
           platform: job.platform,
           accountId: job.accountId,
@@ -458,10 +446,6 @@ async function processDueJobs() {
 
 // ── Routes ───────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  const templateOptions = Object.keys(TEMPLATES)
-    .map(key => `<option value="${key}">${TEMPLATES[key].label}</option>`)
-    .join('');
-
   res.send(`
     <html>
       <head>
@@ -580,9 +564,6 @@ app.get('/', (req, res) => {
           <label>CTA button text</label>
           <input name="cta" placeholder="Shop Now" value="Learn More"/>
 
-          <label>Template</label>
-          <select name="template">${templateOptions}</select>
-
           <label>Orientation</label>
           <select name="orientation">
             <option value="portrait">Portrait</option>
@@ -599,19 +580,11 @@ app.get('/', (req, res) => {
         <textarea id="batchList" rows="8" placeholder="coffee shop morning | Your mornings just got better | Fresh roasted, delivered. | Shop Now
 skincare routine | Glow starts here | Clinically tested, dermatologist approved. | Try It Free"></textarea>
 
-        <div class="row">
-          <div>
-            <label>Template</label>
-            <select id="batchTemplate">${templateOptions}</select>
-          </div>
-          <div>
-            <label>Media type</label>
-            <select id="batchMediaKind">
-              <option value="image">Image (X)</option>
-              <option value="video">Video (TikTok)</option>
-            </select>
-          </div>
-        </div>
+        <label>Media type</label>
+        <select id="batchMediaKind">
+          <option value="image">Image (X)</option>
+          <option value="video">Video (TikTok)</option>
+        </select>
 
         <div class="row">
           <div>
@@ -815,7 +788,6 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
 
             const payload = {
               items,
-              template: document.getElementById('batchTemplate').value,
               mediaKind,
               videoSeconds: parseInt(document.getElementById('batchVideoSeconds').value, 10) || 3,
               intervalMinutes: parseInt(document.getElementById('batchInterval').value, 10) || 10,
@@ -867,7 +839,7 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
 
 app.get('/generate', async (req, res) => {
   try {
-    const { query, hook, copy, cta, template, orientation } = req.query;
+    const { query, hook, copy, cta, orientation } = req.query;
     if (!query) return res.status(400).json({ error: 'query param is required — this is your Pexels search term' });
     if (!hook) return res.status(400).json({ error: 'hook query param is required — write your own headline' });
 
@@ -878,7 +850,6 @@ app.get('/generate', async (req, res) => {
       hook,
       copy,
       cta,
-      templateKey: template,
       layout: LAYOUT_POST
     });
 
@@ -895,7 +866,7 @@ app.get('/generate', async (req, res) => {
 // then a Ken Burns zoom turns the still into a few seconds of motion.
 app.get('/generate-video', async (req, res) => {
   try {
-    const { query, hook, copy, cta, template, orientation, seconds } = req.query;
+    const { query, hook, copy, cta, orientation, seconds } = req.query;
     if (!query) return res.status(400).json({ error: 'query param is required — this is your Pexels search term' });
     if (!hook) return res.status(400).json({ error: 'hook query param is required — write your own headline' });
 
@@ -906,7 +877,6 @@ app.get('/generate-video', async (req, res) => {
       hook,
       copy,
       cta,
-      templateKey: template,
       layout: LAYOUT_VIDEO
     });
 
@@ -931,8 +901,7 @@ app.get('/generate-video', async (req, res) => {
 //
 // Body:
 // {
-//   items: [{ query, hook, copy, cta, template?, orientation?, mediaKind? }, ...],
-//   template: "limited_offer",        // default template if item doesn't override
+//   items: [{ query, hook, copy, cta, orientation?, mediaKind? }, ...],
 //   mediaKind: "image" | "video",     // default media kind, "image" if omitted
 //   videoSeconds: 3,                  // Ken Burns clip length, 2-4s, video only
 //   intervalMinutes: 10,              // spacing between each post's scheduledFor
@@ -945,7 +914,7 @@ app.get('/generate-video', async (req, res) => {
 app.post('/schedule-batch', async (req, res) => {
   try {
     const {
-      items, template, intervalMinutes, startTime,
+      items, intervalMinutes, startTime,
       platform, accountId, timezone,
       mediaKind, videoSeconds, leadMinutes
     } = req.body || {};
@@ -1002,7 +971,6 @@ app.post('/schedule-batch', async (req, res) => {
         hook: item.hook || '',
         copy: item.copy || '',
         cta: item.cta || 'Learn More',
-        template: item.template || template,
         orientation: item.orientation || 'portrait',
         mediaKind: itemMediaKind,
         videoSeconds,
