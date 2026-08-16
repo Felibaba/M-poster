@@ -141,51 +141,81 @@ function wrapText(text, maxCharsPerLine) {
 // hook = headline, copy = supporting line, cta = button text (e.g. "Shop Now",
 // "Learn More", "Grab Yours"). Replaces the movie app's title/hook/rating/genres.
 //
-// Layout is computed dynamically top-to-bottom (hook -> copy -> CTA) based on
-// how many lines the hook/copy actually wrap to, instead of fixed pixel offsets.
-// A long 3-line hook shrinks its font and pushes the copy/CTA down accordingly,
-// so nothing can ever overlap. If everything still doesn't fit in the text
-// area, all three elements scale down together as a last resort.
+// IMPORTANT: this never drops lines. Earlier versions capped hook/copy at a
+// fixed line count via .slice() — any text past that limit was silently
+// discarded from the image. Instead, the full wrapped text is measured first,
+// then font sizes are chosen (from a size ladder, largest to smallest) so
+// every line fits in the available text band. Only if the smallest allowed
+// size still doesn't fit does copy get ellipsis-truncated (never the hook,
+// since that's the core message).
 function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
   const accentColor = nextAccentColor();
-  const hookLines = wrapText(hook || '', 20).slice(0, 3);
-  const copyLines = wrapText(copy || '', 42).slice(0, 2);
 
-  // Base sizes depend on hook line count — a 3-line hook starts smaller so
-  // it's less likely to need the emergency scale-down pass below.
-  let hookFontSize = hookLines.length >= 3 ? 40 : hookLines.length === 2 ? 50 : 58;
-  let copyFontSize = hookLines.length >= 3 ? 26 : 30;
-  let hookLineHeight = Math.round(hookFontSize * 1.18);
-  let copyLineHeight = Math.round(copyFontSize * 1.25);
-  let ctaHeight = 64;
-  let topPadding = 50;
-  let gapHookCopy = 26;
-  let gapCopyCta = 34;
-  let bottomPadding = 36;
+  const topPadding = 50;
+  const gapHookCopy = 26;
+  const gapCopyCta = 34;
+  const bottomPadding = 36;
+  const ctaHeight = 64;
 
-  let hookBlockHeight = hookLines.length * hookLineHeight;
-  let copyBlockHeight = copyLines.length * copyLineHeight;
-  let totalNeeded = topPadding + hookBlockHeight + gapHookCopy + copyBlockHeight + gapCopyCta + ctaHeight + bottomPadding;
+  // Try progressively smaller font sizes until the full (unclipped) hook +
+  // copy text fits in the available vertical space. Wider wrap widths pair
+  // with smaller fonts so lines stay readable instead of going edge-to-edge.
+  const sizeLadder = [
+    { hookFont: 58, copyFont: 32, hookChars: 20, copyChars: 42 },
+    { hookFont: 50, copyFont: 28, hookChars: 24, copyChars: 46 },
+    { hookFont: 42, copyFont: 25, hookChars: 28, copyChars: 50 },
+    { hookFont: 36, copyFont: 22, hookChars: 32, copyChars: 56 },
+    { hookFont: 30, copyFont: 19, hookChars: 38, copyChars: 62 },
+    { hookFont: 25, copyFont: 17, hookChars: 44, copyChars: 70 }
+  ];
 
-  // Emergency fallback: hook + copy together still don't fit the text band
-  // (e.g. 3-line hook AND 2-line copy) — scale every measurement down by the
-  // same ratio so the whole block shrinks proportionally instead of colliding.
-  if (totalNeeded > textHeight) {
-    const scale = textHeight / totalNeeded;
-    hookFontSize = Math.max(26, Math.round(hookFontSize * scale));
-    copyFontSize = Math.max(18, Math.round(copyFontSize * scale));
-    hookLineHeight = Math.round(hookFontSize * 1.18);
-    copyLineHeight = Math.round(copyFontSize * 1.25);
-    ctaHeight = Math.max(48, Math.round(ctaHeight * scale));
-    topPadding = Math.round(topPadding * scale);
-    gapHookCopy = Math.round(gapHookCopy * scale);
-    gapCopyCta = Math.round(gapCopyCta * scale);
-    bottomPadding = Math.round(bottomPadding * scale);
-    hookBlockHeight = hookLines.length * hookLineHeight;
-    copyBlockHeight = copyLines.length * copyLineHeight;
+  let chosen = null;
+  let hookLines, copyLines, hookLineHeight, copyLineHeight;
+
+  for (const size of sizeLadder) {
+    hookLines = wrapText(hook || '', size.hookChars);
+    copyLines = wrapText(copy || '', size.copyChars);
+    hookLineHeight = Math.round(size.hookFont * 1.18);
+    copyLineHeight = Math.round(size.copyFont * 1.25);
+
+    const hookBlockHeight = hookLines.length * hookLineHeight;
+    const copyBlockHeight = copyLines.length * copyLineHeight;
+    const totalNeeded = topPadding + hookBlockHeight + gapHookCopy + copyBlockHeight + gapCopyCta + ctaHeight + bottomPadding;
+
+    if (totalNeeded <= textHeight) {
+      chosen = size;
+      break;
+    }
   }
+
+  // Nothing on the ladder fit (extremely long hook+copy) — use the smallest
+  // size and, as a last resort, ellipsis-truncate copy (not hook) so the
+  // layout still fits rather than overflowing off the image.
+  if (!chosen) {
+    chosen = sizeLadder[sizeLadder.length - 1];
+    hookLines = wrapText(hook || '', chosen.hookChars);
+    copyLines = wrapText(copy || '', chosen.copyChars);
+    hookLineHeight = Math.round(chosen.hookFont * 1.18);
+    copyLineHeight = Math.round(chosen.copyFont * 1.25);
+
+    const maxHookLines = 4;
+    if (hookLines.length > maxHookLines) hookLines = hookLines.slice(0, maxHookLines);
+
+    const hookBlockHeight = hookLines.length * hookLineHeight;
+    const availableForCopy = textHeight - topPadding - hookBlockHeight - gapHookCopy - gapCopyCta - ctaHeight - bottomPadding;
+    const maxCopyLines = Math.max(1, Math.floor(availableForCopy / copyLineHeight));
+
+    if (copyLines.length > maxCopyLines) {
+      copyLines = copyLines.slice(0, maxCopyLines);
+      const lastIdx = copyLines.length - 1;
+      copyLines[lastIdx] = copyLines[lastIdx].replace(/[.,;:\s]*$/, '') + '...';
+    }
+  }
+
+  const hookFontSize = chosen.hookFont;
+  const copyFontSize = chosen.copyFont;
 
   const hookTspans = hookLines
     .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : hookLineHeight}">${escapeXml(line)}</tspan>`)
@@ -194,8 +224,6 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
     .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : copyLineHeight}">${escapeXml(line)}</tspan>`)
     .join('');
 
-  // Y positions are derived from where the previous block actually ended,
-  // not hardcoded offsets — this is what guarantees no overlap.
   const hookY = photoHeight + topPadding + Math.round(hookFontSize * 0.85);
   const copyY = hookY + (hookLines.length - 1) * hookLineHeight + gapHookCopy + Math.round(copyFontSize * 0.85);
   const ctaTop = copyY + (copyLines.length - 1) * copyLineHeight + gapCopyCta;
@@ -204,8 +232,8 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
   // though it's a static image — sized to the string length so short CTAs
   // ("Shop Now") don't get a stretched-out button.
   const ctaText = escapeXml(cta || 'Learn More');
-  const ctaFontSize = Math.max(20, Math.round(30 * (ctaHeight / 64)));
-  const ctaWidth = Math.max(220, ctaText.length * (ctaFontSize * 0.65) + 80);
+  const ctaFontSize = 30;
+  const ctaWidth = Math.max(240, ctaText.length * 20 + 80);
   const ctaX = (width - ctaWidth) / 2;
 
   return `
