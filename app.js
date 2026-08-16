@@ -595,6 +595,7 @@ app.get('/', (req, res) => {
           .pill.done { color: #4ade80; border-color: #22582f; }
           .pill.failed { color: #f87171; border-color: #5c2323; }
           .pill.pending, .pill.processing { color: #fbbf24; border-color: #5c4a1f; }
+          .pill.cancelled { color: #9ca3af; border-color: #3d4552; }
 
           #jobsFilters { display: flex; gap: 8px; margin-top: 12px; }
           #jobsFilters select { flex: 1; }
@@ -625,6 +626,13 @@ app.get('/', (req, res) => {
           .status-badge.done { background: #143820; color: #4ade80; }
           .status-badge.failed { background: #3a1616; color: #f87171; }
           .status-badge.pending, .status-badge.processing { background: #3a2f0f; color: #fbbf24; }
+          .status-badge.cancelled { background: #2a3038; color: #9ca3af; }
+          #stopBatchBtn {
+            background: #7f1d1d;
+            display: none;
+            margin-top: 10px;
+          }
+          #stopBatchBtn:hover { background: #991b1b; }
           .error-text { color: #f87171; font-size: 11px; }
           #jobsTableWrap { max-height: 420px; overflow-y: auto; border: 1px solid #2d4066; border-radius: 8px; }
         </style>
@@ -697,6 +705,7 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
         </div>
 
         <button id="batchSubmit">Schedule Batch</button>
+        <button id="stopBatchBtn">Stop Current Batch</button>
         <p class="hint" id="batchProgress"></p>
 
         <h3>Analytics — All Posts</h3>
@@ -710,6 +719,7 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
             <option value="failed">Failed</option>
             <option value="processing">Processing</option>
             <option value="pending">Pending</option>
+            <option value="cancelled">Cancelled</option>
           </select>
           <select id="filterPlatform">
             <option value="">All platforms</option>
@@ -733,7 +743,9 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
 
         <script>
           const btn = document.getElementById('batchSubmit');
+          const stopBtn = document.getElementById('stopBatchBtn');
           const progressEl = document.getElementById('batchProgress');
+          let activeBatchId = null;
           const mediaKindSel = document.getElementById('batchMediaKind');
           const videoSecondsWrap = document.getElementById('batchVideoSecondsWrap');
           const statPillsEl = document.getElementById('statPills');
@@ -797,7 +809,8 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
               '<span class="pill done">' + s.done + ' done</span>' +
               '<span class="pill failed">' + s.failed + ' failed</span>' +
               '<span class="pill processing">' + s.processing + ' processing</span>' +
-              '<span class="pill pending">' + s.pending + ' pending</span>';
+              '<span class="pill pending">' + s.pending + ' pending</span>' +
+              '<span class="pill cancelled">' + (s.cancelled || 0) + ' cancelled</span>';
 
             if (!data.jobs.length) {
               jobsBodyEl.innerHTML = '<tr><td colspan="6">No posts queued yet.</td></tr>';
@@ -833,14 +846,41 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
               loadAnalytics();
 
               if (data.pending === 0 && data.processing === 0) {
-                progressEl.textContent = 'Batch complete.';
+                progressEl.textContent = data.cancelled
+                  ? 'Batch stopped — ' + data.cancelled + ' item(s) cancelled before generating.'
+                  : 'Batch complete.';
                 clearInterval(pollTimer);
                 pollTimer = null;
+                activeBatchId = null;
+                stopBtn.style.display = 'none';
               }
             } catch (err) {
               progressEl.textContent = 'Status check failed: ' + err.message;
             }
           }
+
+          stopBtn.addEventListener('click', async () => {
+            if (!activeBatchId) return;
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+            try {
+              const res = await fetch('/batch-cancel/' + activeBatchId, { method: 'POST' });
+              const data = await res.json();
+              if (!res.ok) {
+                progressEl.textContent = 'Error stopping batch: ' + (data.error || 'unknown error');
+                return;
+              }
+              progressEl.textContent = data.stillProcessing > 0
+                ? 'Stopped ' + data.cancelled + ' queued item(s). ' + data.stillProcessing + ' item was already generating and will finish.'
+                : 'Stopped ' + data.cancelled + ' queued item(s).';
+              loadAnalytics();
+            } catch (err) {
+              progressEl.textContent = 'Error stopping batch: ' + err.message;
+            } finally {
+              stopBtn.disabled = false;
+              stopBtn.textContent = 'Stop Current Batch';
+            }
+          });
 
           btn.addEventListener('click', async () => {
             const lines = document.getElementById('batchList').value
@@ -896,6 +936,8 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
               }
 
               progressEl.textContent = 'Queued. Generating each post shortly before its slot — see the Analytics table below for live status.';
+              activeBatchId = data.batchId;
+              stopBtn.style.display = 'block';
               loadAnalytics();
               pollBatch(data.batchId);
               pollTimer = setInterval(() => pollBatch(data.batchId), 5000);
@@ -1086,6 +1128,37 @@ app.post('/schedule-batch', async (req, res) => {
   }
 });
 
+// Cancels a batch: any job in that batch still in 'pending' status gets
+// flipped to 'cancelled' so the next processDueJobs() tick skips it.
+// Jobs already 'processing' when this is called are NOT interrupted —
+// generation/upload for that single item finishes normally rather than
+// leaving a half-uploaded post on Zernio; everything else in the batch
+// still queued stops before it starts. Jobs already 'done' or 'failed'
+// are untouched (nothing to cancel).
+app.post('/batch-cancel/:batchId', async (req, res) => {
+  const jobs = queue.filter(j => j.batchId === req.params.batchId);
+  if (!jobs.length) return res.status(404).json({ error: 'Batch not found' });
+
+  let cancelledCount = 0;
+  for (const job of jobs) {
+    if (job.status === 'pending') {
+      job.status = 'cancelled';
+      job.error = 'Cancelled by user before generation started';
+      cancelledCount++;
+    }
+  }
+  await saveQueue();
+
+  const stillProcessing = jobs.filter(j => j.status === 'processing').length;
+
+  res.json({
+    batchId: req.params.batchId,
+    cancelled: cancelledCount,
+    stillProcessing, // heads up if one item was already mid-render when cancel was hit
+    total: jobs.length
+  });
+});
+
 // Poll this to see progress on a batch: how many jobs are pending
 // (waiting for their generateAt time), processing, done, or failed.
 app.get('/batch-status/:batchId', (req, res) => {
@@ -1099,6 +1172,7 @@ app.get('/batch-status/:batchId', (req, res) => {
     processing: jobs.filter(j => j.status === 'processing').length,
     done: jobs.filter(j => j.status === 'done').length,
     failed: jobs.filter(j => j.status === 'failed').length,
+    cancelled: jobs.filter(j => j.status === 'cancelled').length,
     jobs: jobs.map(j => ({
       id: j.id, hook: j.hook, mediaKind: j.mediaKind, platform: j.platform,
       scheduledFor: j.scheduledFor, generateAt: j.generateAt,
@@ -1123,6 +1197,7 @@ app.get('/batches', (req, res) => {
     }
     const b = byBatch[j.batchId];
     b.total++;
+    if (b[j.status] === undefined) b[j.status] = 0;
     b[j.status]++;
   }
   const batches = Object.values(byBatch).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -1146,7 +1221,8 @@ app.get('/jobs', (req, res) => {
     pending: queue.filter(j => j.status === 'pending').length,
     processing: queue.filter(j => j.status === 'processing').length,
     done: queue.filter(j => j.status === 'done').length,
-    failed: queue.filter(j => j.status === 'failed').length
+    failed: queue.filter(j => j.status === 'failed').length,
+    cancelled: queue.filter(j => j.status === 'cancelled').length
   };
 
   res.json({
