@@ -140,6 +140,12 @@ function wrapText(text, maxCharsPerLine) {
 
 // hook = headline, copy = supporting line, cta = button text (e.g. "Shop Now",
 // "Learn More", "Grab Yours"). Replaces the movie app's title/hook/rating/genres.
+//
+// Layout is computed dynamically top-to-bottom (hook -> copy -> CTA) based on
+// how many lines the hook/copy actually wrap to, instead of fixed pixel offsets.
+// A long 3-line hook shrinks its font and pushes the copy/CTA down accordingly,
+// so nothing can ever overlap. If everything still doesn't fit in the text
+// area, all three elements scale down together as a last resort.
 function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
@@ -147,39 +153,79 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
   const hookLines = wrapText(hook || '', 20).slice(0, 3);
   const copyLines = wrapText(copy || '', 42).slice(0, 2);
 
+  // Base sizes depend on hook line count — a 3-line hook starts smaller so
+  // it's less likely to need the emergency scale-down pass below.
+  let hookFontSize = hookLines.length >= 3 ? 40 : hookLines.length === 2 ? 50 : 58;
+  let copyFontSize = hookLines.length >= 3 ? 26 : 30;
+  let hookLineHeight = Math.round(hookFontSize * 1.18);
+  let copyLineHeight = Math.round(copyFontSize * 1.25);
+  let ctaHeight = 64;
+  let topPadding = 50;
+  let gapHookCopy = 26;
+  let gapCopyCta = 34;
+  let bottomPadding = 36;
+
+  let hookBlockHeight = hookLines.length * hookLineHeight;
+  let copyBlockHeight = copyLines.length * copyLineHeight;
+  let totalNeeded = topPadding + hookBlockHeight + gapHookCopy + copyBlockHeight + gapCopyCta + ctaHeight + bottomPadding;
+
+  // Emergency fallback: hook + copy together still don't fit the text band
+  // (e.g. 3-line hook AND 2-line copy) — scale every measurement down by the
+  // same ratio so the whole block shrinks proportionally instead of colliding.
+  if (totalNeeded > textHeight) {
+    const scale = textHeight / totalNeeded;
+    hookFontSize = Math.max(26, Math.round(hookFontSize * scale));
+    copyFontSize = Math.max(18, Math.round(copyFontSize * scale));
+    hookLineHeight = Math.round(hookFontSize * 1.18);
+    copyLineHeight = Math.round(copyFontSize * 1.25);
+    ctaHeight = Math.max(48, Math.round(ctaHeight * scale));
+    topPadding = Math.round(topPadding * scale);
+    gapHookCopy = Math.round(gapHookCopy * scale);
+    gapCopyCta = Math.round(gapCopyCta * scale);
+    bottomPadding = Math.round(bottomPadding * scale);
+    hookBlockHeight = hookLines.length * hookLineHeight;
+    copyBlockHeight = copyLines.length * copyLineHeight;
+  }
+
   const hookTspans = hookLines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : 62}">${escapeXml(line)}</tspan>`)
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : hookLineHeight}">${escapeXml(line)}</tspan>`)
     .join('');
   const copyTspans = copyLines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : 40}">${escapeXml(line)}</tspan>`)
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : copyLineHeight}">${escapeXml(line)}</tspan>`)
     .join('');
+
+  // Y positions are derived from where the previous block actually ended,
+  // not hardcoded offsets — this is what guarantees no overlap.
+  const hookY = photoHeight + topPadding + Math.round(hookFontSize * 0.85);
+  const copyY = hookY + (hookLines.length - 1) * hookLineHeight + gapHookCopy + Math.round(copyFontSize * 0.85);
+  const ctaTop = copyY + (copyLines.length - 1) * copyLineHeight + gapCopyCta;
 
   // CTA rendered as a pill/button so it reads as clickable/actionable even
   // though it's a static image — sized to the string length so short CTAs
   // ("Shop Now") don't get a stretched-out button.
   const ctaText = escapeXml(cta || 'Learn More');
-  const ctaWidth = Math.max(240, ctaText.length * 20 + 80);
+  const ctaFontSize = Math.max(20, Math.round(30 * (ctaHeight / 64)));
+  const ctaWidth = Math.max(220, ctaText.length * (ctaFontSize * 0.65) + 80);
   const ctaX = (width - ctaWidth) / 2;
-  const ctaY = height - 110;
 
   return `
   <svg width="${width}" height="${height}">
     <defs>
       <style>
-        .hook { font: 800 58px sans-serif; fill: #ffffff; }
-        .copy { font: 400 32px sans-serif; fill: #e6e6e6; }
-        .cta { font: 700 30px sans-serif; fill: #0d0d0d; }
+        .hook { font: 800 ${hookFontSize}px sans-serif; fill: #ffffff; }
+        .copy { font: 400 ${copyFontSize}px sans-serif; fill: #e6e6e6; }
+        .cta { font: 700 ${ctaFontSize}px sans-serif; fill: #0d0d0d; }
       </style>
     </defs>
 
     <rect x="0" y="${photoHeight}" width="${width}" height="${textHeight}" fill="#0d0d0d"/>
     <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${accentColor}"/>
 
-    <text x="50%" y="${photoHeight + 100}" text-anchor="middle" class="hook">${hookTspans}</text>
-    <text x="50%" y="${photoHeight + 225}" text-anchor="middle" class="copy">${copyTspans}</text>
+    <text x="50%" y="${hookY}" text-anchor="middle" class="hook">${hookTspans}</text>
+    <text x="50%" y="${copyY}" text-anchor="middle" class="copy">${copyTspans}</text>
 
-    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${accentColor}"/>
-    <text x="50%" y="${ctaY + 42}" text-anchor="middle" class="cta">${ctaText}</text>
+    <rect x="${ctaX}" y="${ctaTop}" width="${ctaWidth}" height="${ctaHeight}" rx="${ctaHeight / 2}" fill="${accentColor}"/>
+    <text x="50%" y="${ctaTop + ctaHeight * 0.65}" text-anchor="middle" class="cta">${ctaText}</text>
   </svg>`;
 }
 
@@ -301,8 +347,19 @@ async function createZernioPost({ content, mediaUrl, mediaType, platform, accoun
   if (!ZERNIO_API_KEY) throw new Error('Missing ZERNIO_API_KEY');
   if (!accountId) throw new Error('Missing Zernio accountId');
 
+  // TikTok photo/carousel posts use `content` as the slideshow title, hard-capped
+  // at 90 characters by TikTok's API — video posts don't have this limit.
+  // Truncate on a word boundary so a long hook+copy combo doesn't get rejected
+  // with a 400 at post time instead of failing silently or looking chopped mid-word.
+  let finalContent = content;
+  if (platform === 'tiktok' && mediaType === 'image' && finalContent.length > 90) {
+    const trimmed = finalContent.slice(0, 87);
+    const lastSpace = trimmed.lastIndexOf(' ');
+    finalContent = (lastSpace > 60 ? trimmed.slice(0, lastSpace) : trimmed).trim() + '...';
+  }
+
   const body = {
-    content,
+    content: finalContent,
     mediaItems: mediaUrl ? [{ url: mediaUrl, type: mediaType }] : [],
     platforms: [{ platform, accountId }]
   };
