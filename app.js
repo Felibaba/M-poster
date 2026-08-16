@@ -63,9 +63,31 @@ const LAYOUT_VIDEO = { width: 1080, height: 1920, photoHeight: 1500 };
 
 const JPEG_QUALITY = 82; // 0-100, lower = smaller file / faster upload, less sharp
 
-// Accent color used for the stripe under the photo and the CTA button.
-// Change this directly if you want a different brand color.
-const ACCENT_COLOR = '#E63946';
+// Curated accent palette — a random one is picked per poster for the stripe
+// under the photo and the CTA button, so a batch doesn't look monotonous.
+// Background stays black and hook/copy text always stays white regardless.
+const ACCENT_PALETTE = [
+  '#E63946', // red
+  '#F4A261', // orange
+  '#2A9D8F', // teal
+  '#457B9D', // blue
+  '#8338EC', // purple
+  '#FF006E', // pink
+  '#06D6A0', // mint
+  '#FFD60A', // yellow
+  '#EF476F', // rose
+  '#118AB2'  // ocean blue
+];
+
+// Cycles through the palette in order (not random) so colors are guaranteed
+// not to repeat until the whole palette has been used once — e.g. posters
+// 1-10 each get a different color, poster 11 starts the palette over.
+let paletteIndex = 0;
+function nextAccentColor() {
+  const color = ACCENT_PALETTE[paletteIndex % ACCENT_PALETTE.length];
+  paletteIndex++;
+  return color;
+}
 
 // ── Pexels lookup ───────────────────────────────────────────────
 // orientation: 'portrait' (default, matches LAYOUT_POST/LAYOUT_VIDEO crop),
@@ -121,6 +143,7 @@ function wrapText(text, maxCharsPerLine) {
 function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
+  const accentColor = nextAccentColor();
   const hookLines = wrapText(hook || '', 20).slice(0, 3);
   const copyLines = wrapText(copy || '', 42).slice(0, 2);
 
@@ -150,12 +173,12 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
     </defs>
 
     <rect x="0" y="${photoHeight}" width="${width}" height="${textHeight}" fill="#0d0d0d"/>
-    <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${ACCENT_COLOR}"/>
+    <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${accentColor}"/>
 
     <text x="50%" y="${photoHeight + 100}" text-anchor="middle" class="hook">${hookTspans}</text>
     <text x="50%" y="${photoHeight + 225}" text-anchor="middle" class="copy">${copyTspans}</text>
 
-    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${ACCENT_COLOR}"/>
+    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${accentColor}"/>
     <text x="50%" y="${ctaY + 42}" text-anchor="middle" class="cta">${ctaText}</text>
   </svg>`;
 }
