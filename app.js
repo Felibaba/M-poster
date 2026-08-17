@@ -138,48 +138,114 @@ function wrapText(text, maxCharsPerLine) {
   return lines;
 }
 
+// Shrink-to-fit for a text block: starts at `startFontSize` and steps down
+// (never below `minFontSize`) until the wrapped text's total height fits
+// inside `maxHeight`. Text is NEVER truncated/sliced — if it still doesn't
+// fit at the minimum font size, it renders at the minimum size as-is rather
+// than dropping any words. `weightFactor` approximates average character
+// width as a fraction of font size (bold text is wider per character than
+// regular weight), used to estimate how many characters fit per line.
+function fitTextBlock(text, { maxWidth, maxHeight, startFontSize, minFontSize, weightFactor, lineHeightRatio = 1.22, step = 2 }) {
+  let fontSize = startFontSize;
+  let lines = [];
+  let lineHeight = 0;
+
+  while (fontSize >= minFontSize) {
+    const maxCharsPerLine = Math.max(4, Math.floor(maxWidth / (fontSize * weightFactor)));
+    lines = wrapText(text || '', maxCharsPerLine);
+    lineHeight = fontSize * lineHeightRatio;
+    const totalHeight = lines.length * lineHeight;
+    if (totalHeight <= maxHeight || fontSize === minFontSize) break;
+    fontSize -= step;
+  }
+
+  return { fontSize, lines, lineHeight, totalHeight: lines.length * lineHeight };
+}
+
 // hook = headline, copy = supporting line, cta = button text (e.g. "Shop Now",
 // "Learn More", "Grab Yours"). Replaces the movie app's title/hook/rating/genres.
+//
+// Layout is zone-based so hook/copy/CTA can never overlap: the text area is
+// split into three fixed vertical zones (hook zone, copy zone, CTA zone) and
+// each block's font size shrinks to fit inside its own zone rather than
+// overflowing into the next one. Text is never cut off — only resized.
 function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
   const accentColor = nextAccentColor();
-  const hookLines = wrapText(hook || '', 20).slice(0, 3);
-  const copyLines = wrapText(copy || '', 42).slice(0, 2);
+  const usableWidth = width - 100; // side padding for text wrapping
 
-  const hookTspans = hookLines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : 62}">${escapeXml(line)}</tspan>`)
+  // Reserve a fixed-height zone for the CTA button at the bottom, then split
+  // the remaining space between hook (60%) and copy (40%).
+  const ctaZoneHeight = Math.max(100, Math.round(textHeight * 0.26));
+  const remaining = textHeight - ctaZoneHeight;
+  const hookZoneHeight = Math.round(remaining * 0.6);
+  const copyZoneHeight = remaining - hookZoneHeight;
+
+  const hookZoneTop = photoHeight;
+  const copyZoneTop = hookZoneTop + hookZoneHeight;
+  const ctaZoneTop = copyZoneTop + copyZoneHeight;
+
+  const hookFit = fitTextBlock(hook, {
+    maxWidth: usableWidth,
+    maxHeight: hookZoneHeight - 20,
+    startFontSize: 58,
+    minFontSize: 30,
+    weightFactor: 0.58 // bold
+  });
+  const copyFit = fitTextBlock(copy, {
+    maxWidth: usableWidth,
+    maxHeight: copyZoneHeight - 16,
+    startFontSize: 32,
+    minFontSize: 18,
+    weightFactor: 0.5 // regular
+  });
+
+  // Vertically center each block within its own zone.
+  const hookStartY = hookZoneTop + (hookZoneHeight - hookFit.totalHeight) / 2 + hookFit.fontSize * 0.85;
+  const copyStartY = copyZoneTop + (copyZoneHeight - copyFit.totalHeight) / 2 + copyFit.fontSize * 0.85;
+
+  const hookTspans = hookFit.lines
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : hookFit.lineHeight}">${escapeXml(line)}</tspan>`)
     .join('');
-  const copyTspans = copyLines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : 40}">${escapeXml(line)}</tspan>`)
+  const copyTspans = copyFit.lines
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : copyFit.lineHeight}">${escapeXml(line)}</tspan>`)
     .join('');
 
   // CTA rendered as a pill/button so it reads as clickable/actionable even
-  // though it's a static image — sized to the string length so short CTAs
-  // ("Shop Now") don't get a stretched-out button.
-  const ctaText = escapeXml(cta || 'Learn More');
-  const ctaWidth = Math.max(240, ctaText.length * 20 + 80);
+  // though it's a static image. Button width scales to the text at a base
+  // font size; if that would make the button wider than the canvas allows,
+  // the font shrinks instead of the button overflowing.
+  let ctaFontSize = 30;
+  let ctaText = escapeXml(cta || 'Learn More');
+  let ctaWidth = Math.max(240, ctaText.length * (ctaFontSize * 0.62) + 80);
+  const maxCtaWidth = width - 80;
+  if (ctaWidth > maxCtaWidth) {
+    ctaFontSize = Math.max(18, Math.floor(ctaFontSize * (maxCtaWidth / ctaWidth)));
+    ctaWidth = maxCtaWidth;
+  }
   const ctaX = (width - ctaWidth) / 2;
-  const ctaY = height - 110;
+  const ctaHeight = 64;
+  const ctaY = ctaZoneTop + (ctaZoneHeight - ctaHeight) / 2;
 
   return `
   <svg width="${width}" height="${height}">
     <defs>
       <style>
-        .hook { font: 800 58px sans-serif; fill: #ffffff; }
-        .copy { font: 400 32px sans-serif; fill: #e6e6e6; }
-        .cta { font: 700 30px sans-serif; fill: #0d0d0d; }
+        .hook { font-weight: 800; font-family: sans-serif; fill: #ffffff; }
+        .copy { font-weight: 400; font-family: sans-serif; fill: #e6e6e6; }
+        .cta { font-weight: 700; font-family: sans-serif; fill: #0d0d0d; }
       </style>
     </defs>
 
     <rect x="0" y="${photoHeight}" width="${width}" height="${textHeight}" fill="#0d0d0d"/>
     <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${accentColor}"/>
 
-    <text x="50%" y="${photoHeight + 100}" text-anchor="middle" class="hook">${hookTspans}</text>
-    <text x="50%" y="${photoHeight + 225}" text-anchor="middle" class="copy">${copyTspans}</text>
+    <text x="50%" y="${hookStartY}" text-anchor="middle" class="hook" style="font-size:${hookFit.fontSize}px">${hookTspans}</text>
+    <text x="50%" y="${copyStartY}" text-anchor="middle" class="copy" style="font-size:${copyFit.fontSize}px">${copyTspans}</text>
 
-    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${accentColor}"/>
-    <text x="50%" y="${ctaY + 42}" text-anchor="middle" class="cta">${ctaText}</text>
+    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="${ctaHeight}" rx="32" fill="${accentColor}"/>
+    <text x="50%" y="${ctaY + ctaHeight / 2 + ctaFontSize * 0.35}" text-anchor="middle" class="cta" style="font-size:${ctaFontSize}px">${ctaText}</text>
   </svg>`;
 }
 
