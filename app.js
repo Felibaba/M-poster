@@ -140,120 +140,46 @@ function wrapText(text, maxCharsPerLine) {
 
 // hook = headline, copy = supporting line, cta = button text (e.g. "Shop Now",
 // "Learn More", "Grab Yours"). Replaces the movie app's title/hook/rating/genres.
-//
-// IMPORTANT: this never drops lines. Earlier versions capped hook/copy at a
-// fixed line count via .slice() — any text past that limit was silently
-// discarded from the image. Instead, the full wrapped text is measured first,
-// then font sizes are chosen (from a size ladder, largest to smallest) so
-// every line fits in the available text band. Only if the smallest allowed
-// size still doesn't fit does copy get ellipsis-truncated (never the hook,
-// since that's the core message).
 function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
   const accentColor = nextAccentColor();
-
-  const topPadding = 50;
-  const gapHookCopy = 26;
-  const gapCopyCta = 34;
-  const bottomPadding = 36;
-  const ctaHeight = 64;
-
-  // Try progressively smaller font sizes until the full (unclipped) hook +
-  // copy text fits in the available vertical space. Wider wrap widths pair
-  // with smaller fonts so lines stay readable instead of going edge-to-edge.
-  const sizeLadder = [
-    { hookFont: 58, copyFont: 32, hookChars: 20, copyChars: 42 },
-    { hookFont: 50, copyFont: 28, hookChars: 24, copyChars: 46 },
-    { hookFont: 42, copyFont: 25, hookChars: 28, copyChars: 50 },
-    { hookFont: 36, copyFont: 22, hookChars: 32, copyChars: 56 },
-    { hookFont: 30, copyFont: 19, hookChars: 38, copyChars: 62 },
-    { hookFont: 25, copyFont: 17, hookChars: 44, copyChars: 70 }
-  ];
-
-  let chosen = null;
-  let hookLines, copyLines, hookLineHeight, copyLineHeight;
-
-  for (const size of sizeLadder) {
-    hookLines = wrapText(hook || '', size.hookChars);
-    copyLines = wrapText(copy || '', size.copyChars);
-    hookLineHeight = Math.round(size.hookFont * 1.18);
-    copyLineHeight = Math.round(size.copyFont * 1.25);
-
-    const hookBlockHeight = hookLines.length * hookLineHeight;
-    const copyBlockHeight = copyLines.length * copyLineHeight;
-    const totalNeeded = topPadding + hookBlockHeight + gapHookCopy + copyBlockHeight + gapCopyCta + ctaHeight + bottomPadding;
-
-    if (totalNeeded <= textHeight) {
-      chosen = size;
-      break;
-    }
-  }
-
-  // Nothing on the ladder fit (extremely long hook+copy) — use the smallest
-  // size and, as a last resort, ellipsis-truncate copy (not hook) so the
-  // layout still fits rather than overflowing off the image.
-  if (!chosen) {
-    chosen = sizeLadder[sizeLadder.length - 1];
-    hookLines = wrapText(hook || '', chosen.hookChars);
-    copyLines = wrapText(copy || '', chosen.copyChars);
-    hookLineHeight = Math.round(chosen.hookFont * 1.18);
-    copyLineHeight = Math.round(chosen.copyFont * 1.25);
-
-    const maxHookLines = 4;
-    if (hookLines.length > maxHookLines) hookLines = hookLines.slice(0, maxHookLines);
-
-    const hookBlockHeight = hookLines.length * hookLineHeight;
-    const availableForCopy = textHeight - topPadding - hookBlockHeight - gapHookCopy - gapCopyCta - ctaHeight - bottomPadding;
-    const maxCopyLines = Math.max(1, Math.floor(availableForCopy / copyLineHeight));
-
-    if (copyLines.length > maxCopyLines) {
-      copyLines = copyLines.slice(0, maxCopyLines);
-      const lastIdx = copyLines.length - 1;
-      copyLines[lastIdx] = copyLines[lastIdx].replace(/[.,;:\s]*$/, '') + '...';
-    }
-  }
-
-  const hookFontSize = chosen.hookFont;
-  const copyFontSize = chosen.copyFont;
+  const hookLines = wrapText(hook || '', 20).slice(0, 3);
+  const copyLines = wrapText(copy || '', 42).slice(0, 2);
 
   const hookTspans = hookLines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : hookLineHeight}">${escapeXml(line)}</tspan>`)
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : 62}">${escapeXml(line)}</tspan>`)
     .join('');
   const copyTspans = copyLines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : copyLineHeight}">${escapeXml(line)}</tspan>`)
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : 40}">${escapeXml(line)}</tspan>`)
     .join('');
-
-  const hookY = photoHeight + topPadding + Math.round(hookFontSize * 0.85);
-  const copyY = hookY + (hookLines.length - 1) * hookLineHeight + gapHookCopy + Math.round(copyFontSize * 0.85);
-  const ctaTop = copyY + (copyLines.length - 1) * copyLineHeight + gapCopyCta;
 
   // CTA rendered as a pill/button so it reads as clickable/actionable even
   // though it's a static image — sized to the string length so short CTAs
   // ("Shop Now") don't get a stretched-out button.
   const ctaText = escapeXml(cta || 'Learn More');
-  const ctaFontSize = 30;
   const ctaWidth = Math.max(240, ctaText.length * 20 + 80);
   const ctaX = (width - ctaWidth) / 2;
+  const ctaY = height - 110;
 
   return `
   <svg width="${width}" height="${height}">
     <defs>
       <style>
-        .hook { font: 800 ${hookFontSize}px sans-serif; fill: #ffffff; }
-        .copy { font: 400 ${copyFontSize}px sans-serif; fill: #e6e6e6; }
-        .cta { font: 700 ${ctaFontSize}px sans-serif; fill: #0d0d0d; }
+        .hook { font: 800 58px sans-serif; fill: #ffffff; }
+        .copy { font: 400 32px sans-serif; fill: #e6e6e6; }
+        .cta { font: 700 30px sans-serif; fill: #0d0d0d; }
       </style>
     </defs>
 
     <rect x="0" y="${photoHeight}" width="${width}" height="${textHeight}" fill="#0d0d0d"/>
     <rect x="0" y="${photoHeight}" width="${width}" height="6" fill="${accentColor}"/>
 
-    <text x="50%" y="${hookY}" text-anchor="middle" class="hook">${hookTspans}</text>
-    <text x="50%" y="${copyY}" text-anchor="middle" class="copy">${copyTspans}</text>
+    <text x="50%" y="${photoHeight + 100}" text-anchor="middle" class="hook">${hookTspans}</text>
+    <text x="50%" y="${photoHeight + 225}" text-anchor="middle" class="copy">${copyTspans}</text>
 
-    <rect x="${ctaX}" y="${ctaTop}" width="${ctaWidth}" height="${ctaHeight}" rx="${ctaHeight / 2}" fill="${accentColor}"/>
-    <text x="50%" y="${ctaTop + ctaHeight * 0.65}" text-anchor="middle" class="cta">${ctaText}</text>
+    <rect x="${ctaX}" y="${ctaY}" width="${ctaWidth}" height="64" rx="32" fill="${accentColor}"/>
+    <text x="50%" y="${ctaY + 42}" text-anchor="middle" class="cta">${ctaText}</text>
   </svg>`;
 }
 
@@ -375,19 +301,8 @@ async function createZernioPost({ content, mediaUrl, mediaType, platform, accoun
   if (!ZERNIO_API_KEY) throw new Error('Missing ZERNIO_API_KEY');
   if (!accountId) throw new Error('Missing Zernio accountId');
 
-  // TikTok photo/carousel posts use `content` as the slideshow title, hard-capped
-  // at 90 characters by TikTok's API — video posts don't have this limit.
-  // Truncate on a word boundary so a long hook+copy combo doesn't get rejected
-  // with a 400 at post time instead of failing silently or looking chopped mid-word.
-  let finalContent = content;
-  if (platform === 'tiktok' && mediaType === 'image' && finalContent.length > 90) {
-    const trimmed = finalContent.slice(0, 87);
-    const lastSpace = trimmed.lastIndexOf(' ');
-    finalContent = (lastSpace > 60 ? trimmed.slice(0, lastSpace) : trimmed).trim() + '...';
-  }
-
   const body = {
-    content: finalContent,
+    content,
     mediaItems: mediaUrl ? [{ url: mediaUrl, type: mediaType }] : [],
     platforms: [{ platform, accountId }]
   };
@@ -432,6 +347,23 @@ async function createZernioPost({ content, mediaUrl, mediaType, platform, accoun
   return data.post || data;
 }
 
+// Builds the Zernio caption text. IMPORTANT: this is intentionally NOT
+// `hook + copy`. The hook already appears baked into the poster/video as
+// on-screen text (see buildOverlaySvg) — repeating it here duplicated the
+// same line twice in the caption. The caption should only carry NEW
+// information (the copy) plus the CTA, e.g.:
+//   "Telegram messages get read in minutes, not buried in a promo tab.
+//    Link in bio."
+// If `copy` itself happens to restate the hook, that's a batch-content
+// issue, not this function's job to fix — write copy as a distinct
+// supporting line when drafting your Query | Hook | Copy | CTA batches.
+function buildCaption({ copy, cta }) {
+  const parts = [];
+  if (copy && copy.trim()) parts.push(copy.trim());
+  if (cta && cta.trim()) parts.push(cta.trim());
+  return parts.join('\n\n');
+}
+
 // Generates the poster (image or short video), uploads it to Zernio, and
 // schedules the post at `scheduledFor` (ISO string, paired with `timezone`).
 // mediaKind: 'image' (default, X/portrait layout) or 'video' (TikTok, 9:16 Ken Burns clip)
@@ -468,7 +400,7 @@ async function generateAndSchedule({
   }
 
   const post = await createZernioPost({
-    content: `${hook}\n\n${copy || ''}`.trim(),
+    content: buildCaption({ copy, cta }),
     mediaUrl: publicUrl,
     mediaType: zernioMediaType,
     platform,
@@ -623,7 +555,6 @@ app.get('/', (req, res) => {
           .pill.done { color: #4ade80; border-color: #22582f; }
           .pill.failed { color: #f87171; border-color: #5c2323; }
           .pill.pending, .pill.processing { color: #fbbf24; border-color: #5c4a1f; }
-          .pill.cancelled { color: #9ca3af; border-color: #3d4552; }
 
           #jobsFilters { display: flex; gap: 8px; margin-top: 12px; }
           #jobsFilters select { flex: 1; }
@@ -654,13 +585,6 @@ app.get('/', (req, res) => {
           .status-badge.done { background: #143820; color: #4ade80; }
           .status-badge.failed { background: #3a1616; color: #f87171; }
           .status-badge.pending, .status-badge.processing { background: #3a2f0f; color: #fbbf24; }
-          .status-badge.cancelled { background: #2a3038; color: #9ca3af; }
-          #stopBatchBtn {
-            background: #7f1d1d;
-            display: none;
-            margin-top: 10px;
-          }
-          #stopBatchBtn:hover { background: #991b1b; }
           .error-text { color: #f87171; font-size: 11px; }
           #jobsTableWrap { max-height: 420px; overflow-y: auto; border: 1px solid #2d4066; border-radius: 8px; }
         </style>
@@ -674,7 +598,7 @@ app.get('/', (req, res) => {
           <label>Hook / headline</label>
           <input name="hook" placeholder="Your mornings just got better" required/>
 
-          <label>Copy (supporting line)</label>
+          <label>Copy (supporting line — must add NEW info, not restate the hook)</label>
           <textarea name="copy" rows="2" placeholder="Fresh roasted, delivered to your door."></textarea>
 
           <label>CTA button text</label>
@@ -693,6 +617,7 @@ app.get('/', (req, res) => {
 
         <h3>Batch Schedule to Zernio</h3>
         <p class="hint">One poster per line, format: <strong>Query | Hook | Copy | CTA</strong></p>
+        <p class="hint">Caption posted to Zernio = Copy + CTA only. The Hook is baked into the image/video as on-screen text and is never repeated in the caption — so keep Copy distinct from Hook or it'll still read repetitive.</p>
         <textarea id="batchList" rows="8" placeholder="coffee shop morning | Your mornings just got better | Fresh roasted, delivered. | Shop Now
 skincare routine | Glow starts here | Clinically tested, dermatologist approved. | Try It Free"></textarea>
 
@@ -733,7 +658,6 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
         </div>
 
         <button id="batchSubmit">Schedule Batch</button>
-        <button id="stopBatchBtn">Stop Current Batch</button>
         <p class="hint" id="batchProgress"></p>
 
         <h3>Analytics — All Posts</h3>
@@ -747,7 +671,6 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
             <option value="failed">Failed</option>
             <option value="processing">Processing</option>
             <option value="pending">Pending</option>
-            <option value="cancelled">Cancelled</option>
           </select>
           <select id="filterPlatform">
             <option value="">All platforms</option>
@@ -771,9 +694,7 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
 
         <script>
           const btn = document.getElementById('batchSubmit');
-          const stopBtn = document.getElementById('stopBatchBtn');
           const progressEl = document.getElementById('batchProgress');
-          let activeBatchId = null;
           const mediaKindSel = document.getElementById('batchMediaKind');
           const videoSecondsWrap = document.getElementById('batchVideoSecondsWrap');
           const statPillsEl = document.getElementById('statPills');
@@ -837,8 +758,7 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
               '<span class="pill done">' + s.done + ' done</span>' +
               '<span class="pill failed">' + s.failed + ' failed</span>' +
               '<span class="pill processing">' + s.processing + ' processing</span>' +
-              '<span class="pill pending">' + s.pending + ' pending</span>' +
-              '<span class="pill cancelled">' + (s.cancelled || 0) + ' cancelled</span>';
+              '<span class="pill pending">' + s.pending + ' pending</span>';
 
             if (!data.jobs.length) {
               jobsBodyEl.innerHTML = '<tr><td colspan="6">No posts queued yet.</td></tr>';
@@ -874,41 +794,14 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
               loadAnalytics();
 
               if (data.pending === 0 && data.processing === 0) {
-                progressEl.textContent = data.cancelled
-                  ? 'Batch stopped — ' + data.cancelled + ' item(s) cancelled before generating.'
-                  : 'Batch complete.';
+                progressEl.textContent = 'Batch complete.';
                 clearInterval(pollTimer);
                 pollTimer = null;
-                activeBatchId = null;
-                stopBtn.style.display = 'none';
               }
             } catch (err) {
               progressEl.textContent = 'Status check failed: ' + err.message;
             }
           }
-
-          stopBtn.addEventListener('click', async () => {
-            if (!activeBatchId) return;
-            stopBtn.disabled = true;
-            stopBtn.textContent = 'Stopping...';
-            try {
-              const res = await fetch('/batch-cancel/' + activeBatchId, { method: 'POST' });
-              const data = await res.json();
-              if (!res.ok) {
-                progressEl.textContent = 'Error stopping batch: ' + (data.error || 'unknown error');
-                return;
-              }
-              progressEl.textContent = data.stillProcessing > 0
-                ? 'Stopped ' + data.cancelled + ' queued item(s). ' + data.stillProcessing + ' item was already generating and will finish.'
-                : 'Stopped ' + data.cancelled + ' queued item(s).';
-              loadAnalytics();
-            } catch (err) {
-              progressEl.textContent = 'Error stopping batch: ' + err.message;
-            } finally {
-              stopBtn.disabled = false;
-              stopBtn.textContent = 'Stop Current Batch';
-            }
-          });
 
           btn.addEventListener('click', async () => {
             const lines = document.getElementById('batchList').value
@@ -964,8 +857,6 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
               }
 
               progressEl.textContent = 'Queued. Generating each post shortly before its slot — see the Analytics table below for live status.';
-              activeBatchId = data.batchId;
-              stopBtn.style.display = 'block';
               loadAnalytics();
               pollBatch(data.batchId);
               pollTimer = setInterval(() => pollBatch(data.batchId), 5000);
@@ -1156,37 +1047,6 @@ app.post('/schedule-batch', async (req, res) => {
   }
 });
 
-// Cancels a batch: any job in that batch still in 'pending' status gets
-// flipped to 'cancelled' so the next processDueJobs() tick skips it.
-// Jobs already 'processing' when this is called are NOT interrupted —
-// generation/upload for that single item finishes normally rather than
-// leaving a half-uploaded post on Zernio; everything else in the batch
-// still queued stops before it starts. Jobs already 'done' or 'failed'
-// are untouched (nothing to cancel).
-app.post('/batch-cancel/:batchId', async (req, res) => {
-  const jobs = queue.filter(j => j.batchId === req.params.batchId);
-  if (!jobs.length) return res.status(404).json({ error: 'Batch not found' });
-
-  let cancelledCount = 0;
-  for (const job of jobs) {
-    if (job.status === 'pending') {
-      job.status = 'cancelled';
-      job.error = 'Cancelled by user before generation started';
-      cancelledCount++;
-    }
-  }
-  await saveQueue();
-
-  const stillProcessing = jobs.filter(j => j.status === 'processing').length;
-
-  res.json({
-    batchId: req.params.batchId,
-    cancelled: cancelledCount,
-    stillProcessing, // heads up if one item was already mid-render when cancel was hit
-    total: jobs.length
-  });
-});
-
 // Poll this to see progress on a batch: how many jobs are pending
 // (waiting for their generateAt time), processing, done, or failed.
 app.get('/batch-status/:batchId', (req, res) => {
@@ -1200,7 +1060,6 @@ app.get('/batch-status/:batchId', (req, res) => {
     processing: jobs.filter(j => j.status === 'processing').length,
     done: jobs.filter(j => j.status === 'done').length,
     failed: jobs.filter(j => j.status === 'failed').length,
-    cancelled: jobs.filter(j => j.status === 'cancelled').length,
     jobs: jobs.map(j => ({
       id: j.id, hook: j.hook, mediaKind: j.mediaKind, platform: j.platform,
       scheduledFor: j.scheduledFor, generateAt: j.generateAt,
@@ -1225,7 +1084,6 @@ app.get('/batches', (req, res) => {
     }
     const b = byBatch[j.batchId];
     b.total++;
-    if (b[j.status] === undefined) b[j.status] = 0;
     b[j.status]++;
   }
   const batches = Object.values(byBatch).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -1249,8 +1107,7 @@ app.get('/jobs', (req, res) => {
     pending: queue.filter(j => j.status === 'pending').length,
     processing: queue.filter(j => j.status === 'processing').length,
     done: queue.filter(j => j.status === 'done').length,
-    failed: queue.filter(j => j.status === 'failed').length,
-    cancelled: queue.filter(j => j.status === 'cancelled').length
+    failed: queue.filter(j => j.status === 'failed').length
   };
 
   res.json({
