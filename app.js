@@ -483,7 +483,7 @@ async function generateAndSchedule({
   let publicUrl, zernioMediaType, contentType, buffer;
 
   if (mediaKind === 'video') {
-    const duration = Math.min(Math.max(parseInt(videoSeconds, 10) || 3, 3), 4); // clamp 3-4s (TikTok's API minimum is 3s)
+    const duration = Math.min(Math.max(parseInt(videoSeconds, 10) || 3, 3), 10); // clamp 3-10s (TikTok's API minimum is 3s; 10s is a safe ceiling for the Ken Burns loop)
     buffer = await imageToVideo(imageBuffer, layout, duration);
     contentType = 'video/mp4';
     zernioMediaType = 'video';
@@ -730,8 +730,8 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
             <input id="batchInterval" type="number" min="1" value="10"/>
           </div>
           <div id="batchVideoSecondsWrap" style="display:none;">
-            <label>Video length (sec, 3-4)</label>
-            <input id="batchVideoSeconds" type="number" min="3" max="4" value="3"/>
+            <label>Video length (sec, 3-10)</label>
+            <input id="batchVideoSeconds" type="number" min="3" max="10" value="3"/>
           </div>
         </div>
 
@@ -1028,7 +1028,7 @@ app.get('/generate-video', async (req, res) => {
       layout: LAYOUT_VIDEO
     });
 
-    const duration = Math.min(Math.max(parseInt(seconds, 10) || 3, 2), 4);
+    const duration = Math.min(Math.max(parseInt(seconds, 10) || 3, 2), 10);
     const videoBuffer = await imageToVideo(imageBuffer, LAYOUT_VIDEO, duration);
 
     res.set('Content-Type', 'video/mp4');
@@ -1051,7 +1051,7 @@ app.get('/generate-video', async (req, res) => {
 // {
 //   items: [{ query, hook, copy, cta, orientation?, mediaKind? }, ...],
 //   mediaKind: "image" | "video",     // default media kind, "image" if omitted
-//   videoSeconds: 3,                  // Ken Burns clip length, 2-4s, video only
+//   videoSeconds: 3,                  // Ken Burns clip length, 3-10s, video only
 //   intervalMinutes: 10,              // spacing between each post's scheduledFor
 //   leadMinutes: 5,                   // how long before scheduledFor to generate+upload
 //   startTime: "2026-08-14T18:00:00.000Z",
