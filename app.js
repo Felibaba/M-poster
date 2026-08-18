@@ -89,7 +89,25 @@ function nextAccentColor() {
   return color;
 }
 
-// ── Pexels lookup ───────────────────────────────────────────────
+// Rotating hashtag pool — small and on-topic on purpose. TikTok captions
+// perform better with 3-5 relevant tags than a wall of generic ones, and
+// keeping the caption short is the whole point here. Cycles through the
+// pool (like the accent color) so consecutive posts don't repeat the exact
+// same set, without ever needing to type tags manually.
+const HASHTAG_POOL = [
+  '#Sendi', '#TelegramMarketing', '#CreatorTools', '#NoCodeSaaS',
+  '#LinkInBio', '#EmailMarketing', '#SmallBusinessTools', '#ContentCreator',
+  '#MarketingTips', '#BuildInPublic'
+];
+let hashtagIndex = 0;
+function nextHashtags(count = 4) {
+  const picked = [];
+  for (let i = 0; i < count; i++) {
+    picked.push(HASHTAG_POOL[hashtagIndex % HASHTAG_POOL.length]);
+    hashtagIndex++;
+  }
+  return picked;
+}
 // orientation: 'portrait' (default, matches LAYOUT_POST/LAYOUT_VIDEO crop),
 // 'landscape', or 'square'. size: pulls the 'large' rendition — big enough
 // to crop into either layout without visible upscaling.
@@ -417,16 +435,28 @@ async function createZernioPost({ content, mediaUrl, mediaType, platform, accoun
 // `hook + copy`. The hook already appears baked into the poster/video as
 // on-screen text (see buildOverlaySvg) — repeating it here duplicated the
 // same line twice in the caption. The caption should only carry NEW
-// information (the copy) plus the CTA, e.g.:
+// information (the copy) plus the CTA and hashtags, e.g.:
 //   "Telegram messages get read in minutes, not buried in a promo tab.
-//    Link in bio."
+//
+//    Link in bio
+//
+//    #Sendi #TelegramMarketing #CreatorTools #NoCodeSaaS"
 // If `copy` itself happens to restate the hook, that's a batch-content
 // issue, not this function's job to fix — write copy as a distinct
 // supporting line when drafting your Query | Hook | Copy | CTA batches.
-function buildCaption({ copy, cta }) {
+//
+// hashtags: optional array of tag strings (e.g. from a 5th "|" field in a
+// batch line). If omitted, 4 are auto-picked from the rotating pool so you
+// never have to type them by hand — capped at 4 either way to keep the
+// caption short.
+function buildCaption({ copy, cta, hashtags }) {
   const parts = [];
   if (copy && copy.trim()) parts.push(copy.trim());
   if (cta && cta.trim()) parts.push(cta.trim());
+
+  const tags = (Array.isArray(hashtags) && hashtags.length ? hashtags : nextHashtags(4)).slice(0, 4);
+  if (tags.length) parts.push(tags.join(' '));
+
   return parts.join('\n\n');
 }
 
@@ -434,7 +464,7 @@ function buildCaption({ copy, cta }) {
 // schedules the post at `scheduledFor` (ISO string, paired with `timezone`).
 // mediaKind: 'image' (default, X/portrait layout) or 'video' (TikTok, 9:16 Ken Burns clip)
 async function generateAndSchedule({
-  query, hook, copy, cta, orientation,
+  query, hook, copy, cta, hashtags, orientation,
   platform, accountId, scheduledFor, timezone,
   mediaKind = 'image', videoSeconds = 3
 }) {
@@ -466,7 +496,7 @@ async function generateAndSchedule({
   }
 
   const post = await createZernioPost({
-    content: buildCaption({ copy, cta }),
+    content: buildCaption({ copy, cta, hashtags }),
     mediaUrl: publicUrl,
     mediaType: zernioMediaType,
     platform,
@@ -529,6 +559,7 @@ async function processDueJobs() {
           hook: job.hook,
           copy: job.copy,
           cta: job.cta,
+          hashtags: job.hashtags,
           orientation: job.orientation,
           platform: job.platform,
           accountId: job.accountId,
@@ -682,8 +713,8 @@ app.get('/', (req, res) => {
         </form>
 
         <h3>Batch Schedule to Zernio</h3>
-        <p class="hint">One poster per line, format: <strong>Query | Hook | Copy | CTA</strong></p>
-        <p class="hint">Caption posted to Zernio = Copy + CTA only. The Hook is baked into the image/video as on-screen text and is never repeated in the caption — so keep Copy distinct from Hook or it'll still read repetitive.</p>
+        <p class="hint">One poster per line, format: <strong>Query | Hook | Copy | CTA | Hashtags (optional)</strong></p>
+        <p class="hint">Caption posted to Zernio = Copy + CTA + Hashtags only. The Hook is baked into the image/video as on-screen text and is never repeated in the caption. Leave the 5th field blank to auto-pick 4 on-topic hashtags — no need to type them every time.</p>
         <textarea id="batchList" rows="8" placeholder="coffee shop morning | Your mornings just got better | Fresh roasted, delivered. | Shop Now
 skincare routine | Glow starts here | Clinically tested, dermatologist approved. | Try It Free"></textarea>
 
@@ -877,7 +908,17 @@ skincare routine | Glow starts here | Clinically tested, dermatologist approved.
 
             const items = lines.map(line => {
               const parts = line.split('|').map(p => p.trim());
-              return { query: parts[0] || '', hook: parts[1] || '', copy: parts[2] || '', cta: parts[3] || 'Learn More' };
+              const rawHashtags = parts[4] || '';
+              const hashtags = rawHashtags
+                ? rawHashtags.split(/[\s,]+/).map(t => t.trim()).filter(Boolean).map(t => t.startsWith('#') ? t : '#' + t)
+                : null;
+              return {
+                query: parts[0] || '',
+                hook: parts[1] || '',
+                copy: parts[2] || '',
+                cta: parts[3] || 'Learn More',
+                hashtags
+              };
             }).filter(i => i.query && i.hook);
 
             if (!items.length) {
@@ -1078,6 +1119,7 @@ app.post('/schedule-batch', async (req, res) => {
         hook: item.hook || '',
         copy: item.copy || '',
         cta: item.cta || 'Learn More',
+        hashtags: Array.isArray(item.hashtags) && item.hashtags.length ? item.hashtags : null,
         orientation: item.orientation || 'portrait',
         mediaKind: itemMediaKind,
         videoSeconds,
