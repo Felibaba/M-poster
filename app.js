@@ -312,7 +312,7 @@ async function imageToVideo(imageBuffer, { width, height }, seconds = 3) {
 
   const outWidth = 360;
   const outHeight = 640; // 9:16, smaller than the X image (1080x1350) — low memory footprint
-  const fps = 20;
+  const fps = 30; // TikTok rejects uploads outside 23-60 FPS — 30 is the safe standard
   const frames = seconds * fps;
   const zoomExpr = `if(eq(on,0),1.06,max(zoom-0.0006,1.0))`;
   const filter = `zoompan=z='${zoomExpr}':d=${frames}:s=${outWidth}x${outHeight}:fps=${fps},format=yuv420p`;
