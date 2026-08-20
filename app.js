@@ -60,11 +60,10 @@ const PEXELS_BASE = 'https://api.pexels.com/v1';
 const LAYOUT_POST = { width: 1080, height: 1350, photoHeight: 950 };
 
 // Vertical layout — used for TikTok (9:16, feeds into the video step).
-// Text-forward on purpose: photo gets ~34% of the frame (653px), text zone
-// (hook/copy/CTA) gets ~66% (1267px) — so copy and CTA render at larger font
-// sizes instead of shrinking toward their floors like they did when photoHeight
-// was 1500 (text zone was only ~22% of the frame).
-const LAYOUT_VIDEO = { width: 1080, height: 1920, photoHeight: 653 };
+// Photo gets ~60% of the frame (1152px), text zone (hook/copy/CTA) gets ~40%
+// (768px) — enough room for hook/copy/CTA to render at a readable size
+// without shrinking the photo down to a thin strip.
+const LAYOUT_VIDEO = { width: 1080, height: 1920, photoHeight: 1152 };
 
 const JPEG_QUALITY = 82; // 0-100, lower = smaller file / faster upload, less sharp
 
@@ -188,52 +187,40 @@ function fitTextBlock(text, { maxWidth, maxHeight, startFontSize, minFontSize, w
 // hook = headline, copy = supporting line, cta = button text (e.g. "Shop Now",
 // "Learn More", "Grab Yours"). Replaces the movie app's title/hook/rating/genres.
 //
-// Layout is zone-based so hook/copy/CTA can never overlap: the text area is
-// split into three fixed vertical zones (hook zone, copy zone, CTA zone) and
-// each block's font size shrinks to fit inside its own zone rather than
-// overflowing into the next one. Text is never cut off — only resized.
+// Layout is a tight stack, not independently-centered zones: hook, copy, and
+// CTA are each sized to their ACTUAL content height (not a fixed zone), then
+// placed one after another with a small fixed gap (GAP_HOOK_COPY /
+// GAP_COPY_CTA) between them. The whole stack is then centered as one group
+// within the text area. This keeps copy/CTA close to the hook for
+// readability while still making overlap impossible by construction — each
+// block's Y position is derived from the actual bottom edge of the block
+// above it plus the gap, never from a shared fixed zone boundary.
+const GAP_HOOK_COPY = 22;  // px between bottom of hook and top of copy
+const GAP_COPY_CTA = 30;   // px between bottom of copy and top of CTA button
+
 function buildOverlaySvg({ hook, copy, cta, layout }) {
   const { width, height, photoHeight } = layout;
   const textHeight = height - photoHeight;
   const accentColor = nextAccentColor();
   const usableWidth = width - 100; // side padding for text wrapping
+  const ctaHeight = 64;
 
-  // Reserve a fixed-height zone for the CTA button at the bottom, then split
-  // the remaining space between hook (60%) and copy (40%).
-  const ctaZoneHeight = Math.max(100, Math.round(textHeight * 0.26));
-  const remaining = textHeight - ctaZoneHeight;
-  const hookZoneHeight = Math.round(remaining * 0.6);
-  const copyZoneHeight = remaining - hookZoneHeight;
-
-  const hookZoneTop = photoHeight;
-  const copyZoneTop = hookZoneTop + hookZoneHeight;
-  const ctaZoneTop = copyZoneTop + copyZoneHeight;
-
+  // Fit hook/copy against generous caps (not hard zone boundaries) — real
+  // constraint is the total stack fitting textHeight, checked below.
   const hookFit = fitTextBlock(hook, {
     maxWidth: usableWidth,
-    maxHeight: hookZoneHeight - 20,
+    maxHeight: textHeight * 0.55,
     startFontSize: 58,
     minFontSize: 30,
     weightFactor: 0.58 // bold
   });
   const copyFit = fitTextBlock(copy, {
     maxWidth: usableWidth,
-    maxHeight: copyZoneHeight - 16,
+    maxHeight: textHeight * 0.3,
     startFontSize: 32,
     minFontSize: 18,
     weightFactor: 0.5 // regular
   });
-
-  // Vertically center each block within its own zone.
-  const hookStartY = hookZoneTop + (hookZoneHeight - hookFit.totalHeight) / 2 + hookFit.fontSize * 0.85;
-  const copyStartY = copyZoneTop + (copyZoneHeight - copyFit.totalHeight) / 2 + copyFit.fontSize * 0.85;
-
-  const hookTspans = hookFit.lines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : hookFit.lineHeight}">${escapeXml(line)}</tspan>`)
-    .join('');
-  const copyTspans = copyFit.lines
-    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : copyFit.lineHeight}">${escapeXml(line)}</tspan>`)
-    .join('');
 
   // CTA rendered as a pill/button so it reads as clickable/actionable even
   // though it's a static image. Button width scales to the text at a base
@@ -247,9 +234,42 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
     ctaFontSize = Math.max(18, Math.floor(ctaFontSize * (maxCtaWidth / ctaWidth)));
     ctaWidth = maxCtaWidth;
   }
+
+  // Total height of the stack as actually rendered. If this overflows the
+  // available text area (rare — only with very long hook+copy at min font
+  // size), shrink the two gaps first before anything else, since losing a
+  // few px of whitespace is preferable to losing font size or overlapping.
+  let stackHeight = hookFit.totalHeight + GAP_HOOK_COPY + copyFit.totalHeight + GAP_COPY_CTA + ctaHeight;
+  let gapHookCopy = GAP_HOOK_COPY;
+  let gapCopyCta = GAP_COPY_CTA;
+  if (stackHeight > textHeight) {
+    const overflow = stackHeight - textHeight;
+    const shrink = Math.min(overflow / 2, GAP_HOOK_COPY - 8, GAP_COPY_CTA - 8);
+    if (shrink > 0) {
+      gapHookCopy -= shrink;
+      gapCopyCta -= shrink;
+      stackHeight -= shrink * 2;
+    }
+  }
+
+  const stackTop = photoHeight + Math.max(0, (textHeight - stackHeight) / 2);
+
+  const hookBlockTop = stackTop;
+  const hookStartY = hookBlockTop + hookFit.fontSize * 0.85;
+
+  const copyBlockTop = hookBlockTop + hookFit.totalHeight + gapHookCopy;
+  const copyStartY = copyBlockTop + copyFit.fontSize * 0.85;
+
+  const ctaY = copyBlockTop + copyFit.totalHeight + gapCopyCta;
+
+  const hookTspans = hookFit.lines
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : hookFit.lineHeight}">${escapeXml(line)}</tspan>`)
+    .join('');
+  const copyTspans = copyFit.lines
+    .map((line, i) => `<tspan x="50%" dy="${i === 0 ? 0 : copyFit.lineHeight}">${escapeXml(line)}</tspan>`)
+    .join('');
+
   const ctaX = (width - ctaWidth) / 2;
-  const ctaHeight = 64;
-  const ctaY = ctaZoneTop + (ctaZoneHeight - ctaHeight) / 2;
 
   return `
   <svg width="${width}" height="${height}">
