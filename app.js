@@ -285,8 +285,8 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
     <defs>
       <style>
         .hook { font-weight: 800; font-family: sans-serif; fill: #ffffff; }
-        .copy { font-weight: 400; font-family: sans-serif; fill: #e6e6e6; }
-        .cta { font-weight: 700; font-family: sans-serif; fill: #0d0d0d; }
+        .copy { font-weight: 700; font-family: sans-serif; fill: #ffffff; }
+        .cta { font-weight: 800; font-family: sans-serif; fill: #ffffff; }
       </style>
     </defs>
 
