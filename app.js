@@ -252,7 +252,16 @@ function buildOverlaySvg({ hook, copy, cta, layout }) {
     }
   }
 
-  const stackTop = photoHeight + Math.max(0, (textHeight - stackHeight) / 2);
+  // Anchor the stack near the TOP of the text zone (close under the photo/
+  // accent bar) instead of centering it in the full 40% zone — that's what
+  // was creating the gap between the image and the hook. TOP_PADDING is the
+  // breathing room right under the accent stripe. If the stack is tall
+  // enough that top-anchoring would push it past the bottom of the frame,
+  // clamp to the lowest position where it still fits fully (acts like
+  // bottom-aligned in that edge case, never overflows).
+  const TOP_PADDING = 40;
+  const lowestFittingTop = photoHeight + Math.max(0, textHeight - stackHeight);
+  const stackTop = Math.min(photoHeight + TOP_PADDING, lowestFittingTop);
 
   const hookBlockTop = stackTop;
   const hookStartY = hookBlockTop + hookFit.fontSize * 0.85;
