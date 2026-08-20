@@ -58,8 +58,13 @@ const PEXELS_BASE = 'https://api.pexels.com/v1';
 
 // Horizontal/portrait layout — used for X posts (image)
 const LAYOUT_POST = { width: 1080, height: 1350, photoHeight: 950 };
-// Vertical layout — used for TikTok (9:16, feeds into the video step)
-const LAYOUT_VIDEO = { width: 1080, height: 1920, photoHeight: 1500 };
+
+// Vertical layout — used for TikTok (9:16, feeds into the video step).
+// Text-forward on purpose: photo gets ~34% of the frame (653px), text zone
+// (hook/copy/CTA) gets ~66% (1267px) — so copy and CTA render at larger font
+// sizes instead of shrinking toward their floors like they did when photoHeight
+// was 1500 (text zone was only ~22% of the frame).
+const LAYOUT_VIDEO = { width: 1080, height: 1920, photoHeight: 653 };
 
 const JPEG_QUALITY = 82; // 0-100, lower = smaller file / faster upload, less sharp
 
@@ -707,6 +712,9 @@ app.get('/', (req, res) => {
             <option value="landscape">Landscape</option>
             <option value="square">Square</option>
           </select>
+
+          <label>Video duration (sec, 3-10 — only applies to "Generate Video")</label>
+          <input name="seconds" type="number" min="3" max="10" value="3"/>
 
           <button type="submit" formaction="/generate">Generate Image (X)</button>
           <button type="submit" formaction="/generate-video" style="margin-top:10px; background:#1e3a8a;">Generate Video (TikTok)</button>
