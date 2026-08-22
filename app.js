@@ -458,12 +458,36 @@ async function createZernioPost({ content, mediaUrl, mediaType, platform, accoun
 // issue, not this function's job to fix — write copy as a distinct
 // supporting line when drafting your Query | Hook | Copy | CTA batches.
 // No hashtags — captions are copy + CTA only.
-function buildCaption({ copy, cta }) {
+//
+// TikTok photo/slideshow posts use the ENTIRE caption as the literal
+// slideshow title, hard-capped by TikTok at 90 characters — post it any
+// longer and Zernio 400s with TIKTOK_PHOTO_TITLE_TOO_LONG. Video posts have
+// no such cap (2,200 chars). This function is the single place captions get
+// assembled, so it's also the single place that enforces the limit — pass
+// mediaKind through and it's structurally impossible for a photo caption to
+// ever exceed 90 chars again, no matter how long copy/cta happen to be.
+const TIKTOK_PHOTO_CAPTION_LIMIT = 90;
+
+function truncateAtWordBoundary(text, maxLength) {
+  if (text.length <= maxLength) return text;
+  const sliced = text.slice(0, maxLength - 1); // reserve 1 char for the ellipsis
+  const lastSpace = sliced.lastIndexOf(' ');
+  const trimmed = lastSpace > 0 ? sliced.slice(0, lastSpace) : sliced;
+  return trimmed.trim() + '…';
+}
+
+function buildCaption({ copy, cta, mediaKind }) {
   const parts = [];
   if (copy && copy.trim()) parts.push(copy.trim());
   if (cta && cta.trim()) parts.push(cta.trim());
 
-  return parts.join('\n\n');
+  const isPhoto = mediaKind !== 'video'; // treat missing/unknown mediaKind as photo — the stricter, safer default
+  const caption = parts.join(isPhoto ? ' — ' : '\n\n');
+
+  if (isPhoto && caption.length > TIKTOK_PHOTO_CAPTION_LIMIT) {
+    return truncateAtWordBoundary(caption, TIKTOK_PHOTO_CAPTION_LIMIT);
+  }
+  return caption;
 }
 
 // Generates the poster (image or short video), uploads it to Zernio, and
@@ -502,7 +526,7 @@ async function generateAndSchedule({
   }
 
   const post = await createZernioPost({
-    content: buildCaption({ copy, cta }),
+    content: buildCaption({ copy, cta, mediaKind }),
     mediaUrl: publicUrl,
     mediaType: zernioMediaType,
     platform,
